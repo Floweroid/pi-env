@@ -1,0 +1,8 @@
+{
+  "defaultProvider": "deepseek",
+  "defaultModel": "deepseek-v4-flash",
+  "quietStartup": true,
+  "theme": "default",
+  "packages": [],
+  "extensions": {}
+}

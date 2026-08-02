@@ -1,0 +1,32 @@
+# pi-env — 公开分享模板
+# 以下内容不纳入版本控制
+
+# === 敏感信息 ===
+auth.json
+auth.json.example   # 本地使用时从 example 改名
+trust.json
+models-store.json
+*.key
+*.pem
+.env
+
+# === 运行时数据 ===
+sessions/
+node_modules/
+subagent-logs/
+npm/
+bin/
+
+# === 设备存档 ===
+archive/*
+
+# === 临时文件 ===
+*.bak
+*.bak-*
+.bak-extensions/
+*.swp
+*~
+
+# === 本地配置（各设备不同） ===
+local-models.json
+mcp-cache.json
