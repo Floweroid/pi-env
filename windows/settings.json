@@ -1,0 +1,7 @@
+{
+  "lastChangelogVersion": "0.83.0",
+  "defaultProvider": "deepseek",
+  "defaultModel": "deepseek-v4-pro",
+  "defaultThinkingLevel": "high",
+  "theme": "dark"
+}
