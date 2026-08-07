@@ -67,6 +67,7 @@ ln -sfn /data/pi-work/sessions /data/pi-env/linux/sessions
 ```
 pi-env/
 ├── README.md
+├── SYNC-RULES.md              # 同步安全铁律（LLM 必读）
 ├── .gitignore
 ├── linux/                    # Linux 通用配置
 │   ├── extensions/           # 自定义扩展
@@ -86,6 +87,7 @@ pi-env/
 ├── windows/                  # Windows 适配（按需补充）
 │   └── .gitkeep
 ├── scripts/                  # 管理工具
+│   ├── sync-to-device.sh     # 无损同步（幂等只增不删）
 │   ├── export.sh             # 导出配置供同步
 │   ├── import.sh             # 导入其他设备配置快照
 │   ├── link-local.sh         # 建立/恢复本机软链接
@@ -97,6 +99,22 @@ pi-env/
 ```
 
 ## 管理脚本
+
+### sync-to-device.sh — 无损同步配置
+
+> 同步配置到本机的**唯一安全入口**，LLM 执行同步必须调用此脚本（见 [SYNC-RULES.md](./SYNC-RULES.md)）。
+> 幂等 · 只增不删 · 硬排除 auth.json / trust.json / models-store.json / sessions/ 等本地数据。
+
+```bash
+# 同步 linux → ~/.pi/agent
+/data/pi-env/scripts/sync-to-device.sh
+
+# 预览（不实际写入）
+/data/pi-env/scripts/sync-to-device.sh --dry-run
+
+# 指定 OS
+/data/pi-env/scripts/sync-to-device.sh --os windows
+```
 
 ### export.sh — 导出配置
 
