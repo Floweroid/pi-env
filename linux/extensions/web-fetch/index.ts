@@ -81,8 +81,11 @@ async function getPlaywright() {
 async function renderSPA(url: string, timeoutMs: number): Promise<string> {
   const pw = await getPlaywright();
   const homeDir = process.env.HOME || homedir();
+  const isWin = process.platform === "win32";
   const exePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ||
-    `${homeDir}/.cache/ms-playwright/chromium-1228/chrome-linux64/chrome`;
+    (isWin
+      ? `${homeDir}/.cache/ms-playwright/chromium-1228/chrome-win64/chrome.exe`
+      : `${homeDir}/.cache/ms-playwright/chromium-1228/chrome-linux64/chrome`);
   const browser = await pw.chromium.launch({ 
     headless: true,
     executablePath: exePath,

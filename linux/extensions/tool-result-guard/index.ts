@@ -10,6 +10,8 @@ import { silentRepair, removeMissingCalls, removeOrphanMessages, insertPreceding
 import { handleMissingDialog, orphanLogInfo } from "./dialog";
 import { forceSessionReload } from "./session";
 import { appendLog, type MissingToolInfo } from "./logger";
+import * as os from "node:os";
+import * as path from "node:path";
 
 // ── 类型 ────────────────────────────────────────────────────────────────
 
@@ -105,7 +107,7 @@ export default function (pi: ExtensionAPI) {
         tr: (m.tool_call_id || m.toolCallId || "").slice(-12),
       }));
       require("fs").appendFileSync(
-        "/tmp/tool-result-guard-debug.log",
+        path.join(os.tmpdir(), "tool-result-guard-debug.log"),
         JSON.stringify({ t: new Date().toISOString(), miss: missingIds.map((id: string) => id.slice(-12)), n: debugInfo.length, msgs: debugInfo }) + "\n",
       );
     } catch {}
