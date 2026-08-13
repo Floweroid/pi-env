@@ -1,173 +1,129 @@
-# pi-env — Pi 配置中心
+# pi-env — Pi Agent 插件工具链 & 环境管理
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
 
-一个系统化的 [Pi Coding Agent](https://pi.dev) 环境管理方案 — 按 OS 分类，而非按设备。
-
-## 为什么不是 dotfiles？
-
-社区常见的 `pi-dotfiles` 做法是直接把 `~/.pi/agent/` 镜像到 Git。这在单设备场景下可以，但：
-
-- **多设备管理**：台式机、笔记本、Termux、WSL — 真的需要每台一份配置吗？
-- **答案是不需要** — 同一 OS 下配置完全同构。唯一需要区分的是 **Linux** 和 **Windows**。
-- **多项目管理**：不同项目需要不同的 agent 上下文和扩展组合
-- **扩展迭代**：安全地从开发 → 测试 → 稳定发布
-- **磁盘分离**：SSD 系统盘和 HDD 数据盘的配置/运行时分离
-
-## 核心理念
+为 [Pi Coding Agent](https://pi.dev) 自建的核心插件工具链 + 多设备工程化配置方案——**不止是 dotfiles，是一套 Agent 工作台**。
 
 ```
-┌─────────────────────────────────────────────┐
-│               /data/pi-env/                  │
-│  Git 管理 · 唯一配置源 · 按 OS 分类           │
-├──────────┬──────────┬──────────┬────────────┤
-│  linux/  │ windows/ │ staging/ │  scripts/  │
-│ Linux配置 │ Win配置  │ 发布快照  │  管理工具   │
-└──────────┴──────────┴──────────┴────────────┘
-        │
-  软链接 │  ~/.pi/agent → /data/pi-env/linux/
-        ▼
-  pi 直接读取（Termux、WSL、Desktop 通用）
+8 个自研扩展 · 67 个 TypeScript 文件 · Linux / WSL / Termux / Windows
 ```
 
-## 快速开始
+---
 
-### 1. 克隆本仓库
+## ✨ 亮点
+
+### 🧩 自研插件（触及 Agent 决策与执行核心）
+
+| 扩展 | 解决什么 | 核心机制 |
+|------|---------|---------|
+| **planning** | 任务偏移——做着做着忘了计划 | 两阶段强制同步（计划先于执行）+ Overlay 可视化 + 依赖规则引擎 + 内联标记自动更新 |
+| **subagent** | 单上下文装不下复杂任务 | 独立 `pi` 进程隔离上下文，single / parallel / chain 三模式全异步 |
+| **agent-manager** | 多角色切换混乱 | `/agent` 切换 + 按 agent 注入 context / 工具白名单 / 模型 |
+| **tool-result-guard** | 并行调用偶发 tool_result 丢失（400 错误） | 修复 pi 上游竞态 + 快照问题，静默补全 + 交互兜底 |
+| **permission-gate** | Agent 误执行危险命令 | yolo / warn / strict 三档，拦截 `rm -rf`、`curl|sh`、敏感路径等 |
+| **async-tasks** | 长任务阻塞会话 | 后台执行 + 完成自动注入结果 + peek / kill |
+| **web-fetch** | Agent 没有网络能力 | 正文提取 → Markdown，SPA 渲染，内网 SSRF 拦截 |
+
+> 完整文档见 [docs/extensions/](docs/extensions/)
+
+### 🛠️ 工程化落地
+
+- **按 OS 分类，而非按设备**：Linux Desktop = Termux = WSL = 树莓派，同一份配置
+- **软链接 + 幂等同步**：`~/.pi/agent → /data/pi-env/linux/`，同步脚本幂等只增不删
+- **扩展生命周期**：开发（pi-exp）→ staging 快照 → 稳定发布，实验代码不污染生产
+
+### 🔐 安全设计
+
+- **SYNC-RULES.md**：LLM 同步铁律——同步必须走唯一安全入口，禁止自由发挥
+- **凭证硬隔离**：auth.json / trust.json / sessions/ 永不入 Git，仓库只含示例模板
+- **运行时分离**：配置入 Git，会话历史留在数据盘
+
+---
+
+## 🖼️ 效果演示
+
+> TODO：截图占位——planning Overlay 任务卡片 / 状态栏进度 / subagent 调用记录
+> （终端右上角计划卡片、`📋 3/5 ⚡1` 状态栏，见 [docs/extensions/planning.md](docs/extensions/planning.md)）
+
+---
+
+## 📦 快速开始
+
+### 单机（Linux / WSL / Termux / 树莓派）
 
 ```bash
-git clone https://github.com/<your-username>/pi-env.git /data/pi-env
-```
+git clone https://github.com/Floweroid/pi-env.git /data/pi-env
 
-### 2. 建立软链接
-
-```bash
-# Linux（Desktop / Termux / WSL 通用）
+# 建立软链接：~/.pi/agent → /data/pi-env/linux/
 /data/pi-env/scripts/link-local.sh --os linux
 
-# Windows（Git Bash）
-/data/pi-env/scripts/link-local.sh --os windows
-```
-
-### 3. 配置认证
-
-```bash
+# 配置认证（模板不含真实密钥）
 cp /data/pi-env/linux/config/auth.json.example /data/pi-env/linux/config/auth.json
 # 编辑 auth.json，填入你的 API key
 ```
 
-### 4. 创建运行时目录
+### 多设备同步
 
 ```bash
-mkdir -p /data/pi-work/sessions
-ln -sfn /data/pi-work/sessions /data/pi-env/linux/sessions
-```
-
-## 目录结构
-
-```
-pi-env/
-├── README.md
-├── .gitignore
-├── linux/                    # Linux 通用配置
-│   ├── extensions/           # 自定义扩展
-│   │   ├── agent-manager/    # Agent 管理核心
-│   │   ├── subagent/         # 子进程 agent 委托
-│   │   ├── tool-result-guard/# 工具结果保护
-│   │   ├── planning/         # 任务计划管理
-│   │   ├── web-fetch/        # URL 内容获取
-│   │   ├── async-tasks/      # 异步任务管理
-│   │   └── *.ts              # 单文件扩展
-│   ├── agents/               # Agent 定义模板
-│   │   ├── agent-maker.agent/
-│   │   └── pi-env.agent/
-│   └── config/               # 示例配置
-│       ├── settings.example.json
-│       └── auth.json.example
-├── windows/                  # Windows 适配（按需补充）
-│   └── .gitkeep
-├── scripts/                  # 管理工具
-│   ├── export.sh             # 导出配置供同步
-│   ├── import.sh             # 导入其他设备配置快照
-│   ├── link-local.sh         # 建立/恢复本机软链接
-│   └── publish-from-exp.sh   # 发布扩展到稳定版
-├── staging/                  # 发布快照（git 可回溯）
-├── docs/
-│   └── architecture.md       # 架构说明
-└── projects/                 # 项目级配置（可选）
-```
-
-## 管理脚本
-
-### export.sh — 导出配置
-
-```bash
-# 导出 Linux 配置
+# 从本机导出
 /data/pi-env/scripts/export.sh --os linux pi-linux.tar.gz
 
-# SSH 直传（目标设备执行）
+# 目标设备拉取（SSH 直传）
 ssh user@<server> /data/pi-env/scripts/export.sh | tar xz -C ~/.pi/agent/
 ```
 
-### import.sh — 导入快照
+### Windows（Git Bash）
 
 ```bash
-/data/pi-env/scripts/import.sh /path/to/config.tar.gz --os linux
+/data/pi-env/scripts/link-local.sh --os windows
 ```
 
-### link-local.sh — 恢复软链接
+---
 
-```bash
-/data/pi-env/scripts/link-local.sh --os linux
-```
-
-### publish-from-exp.sh — 发布扩展
-
-```bash
-# 发布到 Linux
-/data/pi-env/scripts/publish-from-exp.sh agent-manager
-
-# 发布到 Windows
-/data/pi-env/scripts/publish-from-exp.sh agent-manager --os windows
-```
-
-## 扩展生命周期
+## 🗂️ 目录结构
 
 ```
-开发阶段：修改插件 → 测试（仅影响开发项目）
-  ↓
- publish-from-exp.sh <name> [--os linux|windows]
-  ↓                    ↓
-staging 快照       linux/extensions/<name>/
+pi-env/
+├── linux/                    # Linux 通用配置（Desktop/Termux/WSL/树莓派）
+│   ├── extensions/           # 8 个自研扩展
+│   ├── agents/               # Agent 定义模板
+│   └── config/               # 示例配置（settings / auth 模板）
+├── windows/                  # Windows 适配
+├── scripts/                  # link-local / export / import / publish-from-exp
+├── staging/                  # 发布快照（git 可回溯）
+├── docs/                     # 📚 文档中心
+└── SYNC-RULES.md             # 同步安全铁律（LLM 必读）
 ```
 
-## 为什么只分 Linux 和 Windows？
+---
 
-Pi 配置文件（settings.json、auth.json、extensions 源码）在同一 OS 下完全通用：
+## 📚 文档中心
 
-- **Linux Desktop** = **Termux (Android)** = **WSL** = **树莓派** — 同一套
-- **Windows** — 路径语法、shell、可用工具不同，需单独适配
+| 文档 | 内容 |
+|------|------|
+| [docs/overview.md](docs/overview.md) | 项目总览：设计哲学、核心概念 |
+| [docs/getting-started.md](docs/getting-started.md) | 快速上手：单机 / 多设备 / Windows |
+| [docs/architecture.md](docs/architecture.md) | 配置中心架构 |
+| [docs/extensions/](docs/extensions/) | 8 个扩展的逐个深度文档 |
+| [docs/development.md](docs/development.md) | 扩展开发指南（ExtensionAPI / 事件钩子 / 发布） |
+| [docs/security.md](docs/security.md) | 安全设计（凭证隔离 / 威胁模型） |
+| [docs/sync.md](docs/sync.md) | 多设备同步机制 |
+| [docs/roadmap.md](docs/roadmap.md) | 路线图（含 **DeepSeek Harness 适配计划**） |
 
-多设备同步只需 `export.sh --os linux`，所有 Linux 设备拉取同一份。
+---
 
-## Git 管理
-
-```bash
-cd /data/pi-env
-git status
-git add -A
-git commit -m "feat: 描述"
-git push
-```
-
-## 安全
+## 🔐 安全
 
 **绝不提交到 Git：**
+
 - `auth.json` — API 密钥
 - `sessions/` — 会话历史
 - `node_modules/` — 第三方依赖
 - `trust.json` — 设备信任配置
 
-本仓库仅包含示例模板，不含真实密钥。
+本仓库仅包含示例模板，不含真实密钥。完整安全模型见 [docs/security.md](docs/security.md)。
+
+---
 
 ## 许可
 
