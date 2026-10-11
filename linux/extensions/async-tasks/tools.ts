@@ -8,7 +8,7 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { spawn } from "node:child_process";
+import { spawn, execFile } from "node:child_process";
 import type { TaskInfo } from "./types.ts";
 
 // ── Shared state ─────────────────────────────────────────────────────────
@@ -223,20 +223,46 @@ export function registerTools(pi: ExtensionAPI) {
       task.exitCode = -1;
       task.finishedAt = Date.now();
 
-      task.child.kill("SIGTERM");
+      const isWindows = process.platform === "win32";
+      let terminated = false;
+
+      const markDone = () => {
+        if (terminated) return;
+        terminated = true;
+        clearTimeout(killTimer);
+      };
+
+      // On Windows, child.kill() only terminates the DIRECT child and does not
+      // reach grandchildren (e.g. `powershell -Command "powershell -File ..."`).
+      // Use taskkill /T to kill the entire process tree reliably.
       const killTimer = setTimeout(() => {
-        if (task.child && !task.child.killed) {
-          task.child.kill("SIGKILL");
+        if (terminated) return;
+        if (isWindows && task.child?.pid) {
+          execFile("taskkill.exe", ["/PID", String(task.child.pid), "/T", "/F"], (err) => {
+            if (err) {
+              // fallback: direct kill
+              task.child?.kill("SIGKILL");
+            } else {
+              markDone();
+            }
+          });
+        } else if (!isWindows) {
+          task.child?.kill("SIGKILL");
         }
       }, 3000);
 
-      task.child.once("close", () => {
-        clearTimeout(killTimer);
-      });
+      task.child.once("close", markDone);
+
+      // First attempt on Windows: kill the whole tree immediately.
+      if (isWindows && task.child?.pid) {
+        execFile("taskkill.exe", ["/PID", String(task.child.pid), "/T", "/F"], () => markDone());
+      } else {
+        task.child.kill("SIGTERM");
+      }
 
       injectResult(pi, task);
 
-      return { content: [{ type: "text", text: `⛔ 已发送终止信号给 ${params.task_id}（SIGTERM，3s 后升级为 SIGKILL）` }] };
+      return { content: [{ type: "text", text: `⛔ 已发送终止信号给 ${params.task_id}（Windows 用 taskkill /T 杀整个进程树；兜底 3s 后强制）` }] };
     },
   });
 }
