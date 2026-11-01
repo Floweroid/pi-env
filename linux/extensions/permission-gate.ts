@@ -64,7 +64,19 @@ const sensitivePathPatterns = [
 ];
 
 // ── 可修改的工具 ──
-const MUTATING_TOOLS = new Set(["bash", "powershell", "async_run", "write", "edit", "subagent"]);
+const MUTATING_TOOLS = new Set([
+  "bash",
+  "powershell",
+  "async_run",
+  "write",
+  "edit",
+  "subagent",
+  "async_kill",
+  "subagent_kill",
+]);
+
+// ── 终止类工具：warn 模式下也无条件询问（不依赖危险命令正则）──
+const KILL_TOOLS = new Set(["async_kill", "subagent_kill"]);
 
 // ── 模式 UI 映射 ──
 const MODE_LABELS: Record<GateMode, string> = {
@@ -156,6 +168,8 @@ export default function (pi: ExtensionAPI) {
     let detail = "";
     if (toolName === "write" || toolName === "edit") {
       detail = (input as any)?.path ?? "";
+    } else if (KILL_TOOLS.has(toolName)) {
+      detail = (input as any)?.task_id ?? "";
     } else {
       detail = (input as any)?.command ?? "";
     }
@@ -169,7 +183,11 @@ export default function (pi: ExtensionAPI) {
 
     // warn 模式：仅危险指令弹窗
     if (mode === "warn") {
-      const reason = toolName === "subagent" ? "subagent" : isDangerous(toolName, detail);
+      const reason = KILL_TOOLS.has(toolName)
+        ? `终止任务 ${detail}`
+        : toolName === "subagent"
+          ? "subagent"
+          : isDangerous(toolName, detail);
       if (!reason) return undefined;
 
       const blockedInfo = `[⛔ 已拦截] 工具: ${toolName} | 指令: ${detail.slice(0, 200)}`;
