@@ -7,7 +7,10 @@
  * 手动触发：/auto-name
  *
  * 状态由 AI 从四个标签选择：进行中 / 已完成 / 暂停 / 闲置。
- * 使用 deepseek-chat（便宜模型），不可用时回退 deepseek-v4-pro。
+ *
+ * 模型：跟随 pi 的默认模型（settings.json 的 defaultProvider + defaultModel）；
+ * 解析不到时回退到当前会话模型 ctx.model。
+ * 需要固定命名专用模型时，把 PREFERRED_NAMING_MODEL 填成 `provider/modelId`。
  * 记录并展示 token 消耗。
  */
 
@@ -23,6 +26,16 @@ const NAME_UPDATE_INTERVAL = 5;
 
 /** 提取多少条最近的消息用于生成名称 */
 const RECENT_MESSAGE_COUNT = 8;
+
+/** 命名请求的 maxTokens（默认模型可能带 reasoning，留一点冗余） */
+const NAMING_MAX_TOKENS = 200;
+
+/**
+ * 命名专用模型（`provider/modelId` 写法）。
+ * 置空 = 不启用，直接走 settings.json 的默认模型（解析链第 1 步）。
+ * 如需固定为某个轻量模型，填回 `provider/modelId`（要求该 provider 已配置凭据）。
+ */
+const PREFERRED_NAMING_MODEL = "";
 
 // ============================================================================
 // 状态标签（AI 只能从中选择）
@@ -81,6 +94,9 @@ interface NamingStats {
   accumulatedCost: number;
   generationCount: number;
 }
+
+/** 从 pi 运行时上下文取到的模型（避免额外 import 具体类型） */
+type ResolvedModel = NonNullable<ExtensionContext["model"]>;
 
 // ============================================================================
 // 辅助函数
@@ -187,6 +203,88 @@ function buildName(status: string, title: string, progress: string): string {
 }
 
 // ============================================================================
+// 模型解析：自动读取 pi 的默认模型
+// ============================================================================
+
+/**
+ * 解析用于命名的模型，优先级：
+ *   0. 固定命名专用模型 PREFERRED_NAMING_MODEL（当前为空 = 跳过此步）
+ *   1. settings.json 的 defaultProvider + defaultModel（pi 的默认模型）
+ *   2. defaultModel 里写成 `provider/modelId` 的完整引用
+ *   3. defaultModel 为裸 id 时，在全量模型表中唯一匹配（多义则优先有凭据的）
+ *   4. 回退到当前会话模型 ctx.model
+ */
+function resolveNamingModel(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+): { model?: ResolvedModel; description: string } {
+  // 0. 命名专用模型（预留开关）：PREFERRED_NAMING_MODEL 为空时整段跳过
+  if (PREFERRED_NAMING_MODEL) {
+    const [prefProvider, ...prefRest] = PREFERRED_NAMING_MODEL.split("/");
+    const prefId = prefRest.join("/");
+    if (prefProvider && prefId) {
+      const preferred = ctx.modelRegistry.find(prefProvider, prefId);
+      if (preferred && ctx.modelRegistry.hasConfiguredAuth(preferred)) {
+        return {
+          model: preferred,
+          description: `${prefProvider}/${prefId}（命名专用）`,
+        };
+      }
+    }
+  }
+
+  const settings = pi.getSettings() as {
+    defaultProvider?: string;
+    defaultModel?: string;
+  };
+
+  let provider = settings.defaultProvider?.trim() || undefined;
+  let modelId = settings.defaultModel?.trim() || undefined;
+
+  // defaultModel 支持 "provider/modelId" 写法
+  if (modelId && modelId.includes("/")) {
+    const [p, ...rest] = modelId.split("/");
+    if (p && rest.length > 0) {
+      provider = p;
+      modelId = rest.join("/");
+    }
+  }
+
+  if (modelId) {
+    if (provider) {
+      const m = ctx.modelRegistry.find(provider, modelId);
+      if (m) return { model: m, description: `${provider}/${modelId}` };
+    }
+
+    const matches = ctx.modelRegistry.getAll().filter((m) => m.id === modelId);
+    const inProvider = provider
+      ? matches.filter((m) => m.provider === provider)
+      : [];
+    const candidates = inProvider.length > 0 ? inProvider : matches;
+
+    if (candidates.length === 1) {
+      const c = candidates[0]!;
+      return { model: c, description: `${c.provider}/${c.id}` };
+    }
+    if (candidates.length > 1) {
+      const withAuth = candidates.find((m) => ctx.modelRegistry.hasConfiguredAuth(m));
+      const c = withAuth ?? candidates[0]!;
+      return { model: c, description: `${c.provider}/${c.id}` };
+    }
+  }
+
+  // 回退：当前会话模型
+  if (ctx.model) {
+    return {
+      model: ctx.model,
+      description: `${ctx.model.provider}/${ctx.model.id}（会话当前模型）`,
+    };
+  }
+
+  return { description: "" };
+}
+
+// ============================================================================
 // AI 命名核心逻辑
 // ============================================================================
 
@@ -209,19 +307,23 @@ async function runAiNaming(
     }
   }
 
-  // 查找模型：deepseek-chat 优先
-  let model = ctx.modelRegistry.find("deepseek", "deepseek-chat");
+  // 模型：自动读取 pi 的默认模型
+  const resolved = resolveNamingModel(pi, ctx);
+  const model = resolved.model;
   if (!model) {
-    model = ctx.modelRegistry.find("deepseek", "deepseek-v4-pro");
-  }
-  if (!model) {
-    ctx.ui.notify("自动命名：无可用的 DeepSeek 模型", "error");
+    ctx.ui.notify(
+      "自动命名：未找到可用模型（settings.json 未配置 defaultModel，且无会话模型）",
+      "error",
+    );
     return false;
   }
 
   const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
   if (!auth.ok || !auth.apiKey) {
-    ctx.ui.notify("自动命名：DeepSeek API key 不可用", "error");
+    ctx.ui.notify(
+      `自动命名：模型 ${resolved.description} 的 API key 不可用${auth.ok ? "" : `: ${auth.error}`}`,
+      "error",
+    );
     return false;
   }
 
@@ -232,6 +334,8 @@ async function runAiNaming(
         .replace("{status}", forcedStatus)
         .replace("{conversation}", conversationText)
     : NAME_USER_PROMPT.replace("{conversation}", conversationText);
+
+  const headers: Record<string, string> = { ...(auth.headers ?? {}) };
 
   try {
     const response = await completeSimple(
@@ -246,7 +350,7 @@ async function runAiNaming(
           },
         ],
       },
-      { maxTokens: 60, apiKey: auth.apiKey, headers: auth.headers },
+      { maxTokens: NAMING_MAX_TOKENS, apiKey: auth.apiKey, headers },
     );
 
     if (response.stopReason === "error") {
@@ -293,7 +397,7 @@ async function runAiNaming(
     stats.consecutiveFails = 0;
 
     // 通知
-    const tokenInfo = `本次${usage.totalTokens}t · 累计${stats.accumulatedTokens}t/${stats.generationCount}次`;
+    const tokenInfo = `${resolved.description} · 本次${usage.totalTokens}t · 累计${stats.accumulatedTokens}t/${stats.generationCount}次`;
     const costInfo = stats.accumulatedCost > 0 ? ` · ¥${stats.accumulatedCost.toFixed(4)}` : "";
 
     if (changed) {
